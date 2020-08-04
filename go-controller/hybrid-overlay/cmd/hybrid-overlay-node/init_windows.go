@@ -16,15 +16,17 @@ limitations under the License.
 package main
 
 import (
+	"context"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/windows/service"
 	"k8s.io/klog"
 )
 
 // initForOS performs Windows specific app initialization
-func initForOS(windowsService bool) error {
-	if windowsService {
+func initForOS(ctx *context.Context) error {
+	if runAsWindowsService {
 		klog.Infof("Initializing Windows service")
-		return service.InitService(appName)
+		return service.InitService(appName, ctx)
 	}
 	return nil
 }

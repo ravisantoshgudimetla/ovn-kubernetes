@@ -25,8 +25,7 @@ then we can revisit importing this module too.
 package service
 
 import (
-	"os"
-	"time"
+	"context"
 
 	"k8s.io/klog"
 
@@ -35,42 +34,41 @@ import (
 )
 
 type handler struct {
-	fromsvc chan error
+	svcName string
+	ctx     *context.Context
+	err     error
 }
 
 // InitService is the entry point for running the daemon as a Windows
 // service. It returns an indication of whether it is running as a service;
 // and an error.
-func InitService(serviceName string) error {
+func InitService(serviceName string, ctx *context.Context) error {
 	h := &handler{
-		fromsvc: make(chan error),
+		svcName: serviceName,
+		ctx:     ctx,
+		err:     nil,
 	}
 
-	var err error
 	go func() {
-		err = svc.Run(serviceName, h)
-		h.fromsvc <- err
+		h.err = svc.Run(serviceName, h)
 	}()
 
-	// Wait for the first signal from the service handler.
-	err = <-h.fromsvc
-	if err != nil {
-		return err
-	}
-	klog.Infof("Running %s as a Windows service!", serviceName)
-	return nil
+	return h.err
 }
 
 func (h *handler) Execute(_ []string, r <-chan svc.ChangeRequest, s chan<- svc.Status) (bool, uint32) {
 	s <- svc.Status{State: svc.StartPending, Accepts: 0}
-	// Unblock initService()
-	h.fromsvc <- nil
+
+	ctx, cancel := context.WithCancel(*h.ctx)
 
 	s <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown | svc.Accepted(windows.SERVICE_ACCEPT_PARAMCHANGE)}
-	klog.Infof("Service running")
+	klog.Infof("Running %s as a Windows service", h.svcName)
 Loop:
 	for {
 		select {
+		case <-ctx.Done():
+			s <- svc.Status{State: svc.StopPending}
+			break Loop
 		case c := <-r:
 			switch c.Cmd {
 			case svc.Cmd(windows.SERVICE_CONTROL_PARAMCHANGE):
@@ -84,15 +82,7 @@ Loop:
 				// As per https://docs.microsoft.com/en-us/windows/desktop/services/service-control-handler-function
 				s <- svc.Status{State: svc.StopPending}
 
-				// We need to exit our process, so atleast the service manager will think that we gracefully exited.
-				// At the time of writing this comment this is needed for applications like hybrid-overlay-node that do not
-				// use signals.
-				go func() {
-					// Ensure the SCM was notified (The operation above (send to s) was received and communicated to the
-					// service control manager - so it doesn't look like the service crashes)
-					time.Sleep(1 * time.Second)
-					os.Exit(0)
-				}()
+				cancel()
 				break Loop
 			}
 		}

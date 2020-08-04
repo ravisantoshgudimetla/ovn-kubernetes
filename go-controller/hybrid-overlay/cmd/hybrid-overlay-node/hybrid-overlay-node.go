@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -38,10 +39,18 @@ func main() {
 			Destination: &nodeName,
 		},
 		&cli.BoolFlag{
-			Name:        "windows-service",
-			Usage:       "Enables hybrid overlay to run as a Windows service. Ignored on Linux.",
-			Destination: &runAsWindowsService,
+			Name:  "windows-service",
+			Usage: "Enables hybrid overlay to run as a Windows service. Ignored on Linux.",
 		}})
+
+	for _, flag := range c.Flags {
+		if strings.Contains(flag.String(), "windows-service") {
+			runAsWindowsService = true
+		}
+	}
+
+	ctx := context.Background()
+
 	c.Action = func(c *cli.Context) error {
 		if err := runHybridOverlay(c); err != nil {
 			panic(err.Error())
@@ -49,29 +58,33 @@ func main() {
 		return nil
 	}
 
-	ctx := context.Background()
-
-	// trap SIGHUP, SIGINT, SIGTERM, SIGQUIT and
-	// cancel the context
-	ctx, cancel := context.WithCancel(ctx)
-	exitCh := make(chan os.Signal, 1)
-	signal.Notify(exitCh,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT)
-	defer func() {
-		signal.Stop(exitCh)
-		cancel()
-	}()
-	go func() {
-		select {
-		case s := <-exitCh:
-			klog.Infof("Received signal %s. Shutting down", s)
-			cancel()
-		case <-ctx.Done():
+	if runAsWindowsService {
+		if err := initForOS(&ctx); err != nil {
+			klog.Exit(err)
 		}
-	}()
+	} else {
+		// trap SIGHUP, SIGINT, SIGTERM, SIGQUIT and
+		// cancel the context
+		ctx, cancel := context.WithCancel(ctx)
+		exitCh := make(chan os.Signal, 1)
+		signal.Notify(exitCh,
+			syscall.SIGHUP,
+			syscall.SIGINT,
+			syscall.SIGTERM,
+			syscall.SIGQUIT)
+		defer func() {
+			signal.Stop(exitCh)
+			cancel()
+		}()
+		go func() {
+			select {
+			case s := <-exitCh:
+				klog.Infof("Received signal %s. Shutting down", s)
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+	}
 
 	if err := c.RunContext(ctx, os.Args); err != nil {
 		klog.Exit(err)
@@ -90,10 +103,6 @@ func runHybridOverlay(ctx *cli.Context) error {
 
 	if nodeName == "" {
 		return fmt.Errorf("missing node name; use the 'node' flag to provide one")
-	}
-
-	if err := initForOS(runAsWindowsService); err != nil {
-		klog.Infof("Error initializing Windows service: %v", err)
 	}
 
 	clientset, _, _, _, err := util.NewClientsets(&config.Kubernetes)

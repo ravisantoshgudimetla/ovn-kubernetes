@@ -15,7 +15,9 @@ limitations under the License.
 
 package main
 
+import "context"
+
 // initForOS performs non-Windows specific app initialization
-func initForOS(service bool) error {
+func initForOS(ctx *context.Context) error {
 	return nil
 }
