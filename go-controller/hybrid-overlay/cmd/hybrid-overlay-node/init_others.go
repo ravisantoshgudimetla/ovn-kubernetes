@@ -15,9 +15,7 @@ limitations under the License.
 
 package main
 
-import "context"
-
 // initForOS performs non-Windows specific app initialization
-func initForOS(ctx *context.Context) error {
-	return nil
+func initForOS(ho *hybridOverLay) error {
+	return ho.Run()
 }

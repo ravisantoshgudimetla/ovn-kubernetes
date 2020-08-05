@@ -3,13 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/signal"
-	"strings"
-	"sync"
-	"syscall"
-
 	"github.com/urfave/cli/v2"
+	"os"
+	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -27,8 +23,19 @@ var runAsWindowsService bool
 
 const appName = "hybrid-overlay-node"
 
+type appWrapper struct {
+	nodeName string
+	runAsWindowsService bool
+	*cli.App
+}
+
+func NewAppWrapper() *appWrapper {
+	return &appWrapper{ "", false,cli.NewApp()}
+}
+
 func main() {
-	c := cli.NewApp()
+	fmt.Println("hi")
+	c := NewAppWrapper()
 	c.Name = appName
 	c.Usage = "a node controller to integrate disparate networks with VXLAN tunnels"
 	c.Version = config.Version
@@ -41,15 +48,19 @@ func main() {
 		&cli.BoolFlag{
 			Name:  "windows-service",
 			Usage: "Enables hybrid overlay to run as a Windows service. Ignored on Linux.",
+			Destination: &c.runAsWindowsService,
 		}})
-
-	for _, flag := range c.Flags {
-		if strings.Contains(flag.String(), "windows-service") {
-			runAsWindowsService = true
-		}
-	}
-
 	ctx := context.Background()
+
+	//for _, flag := range c.Flags {
+	//	if strings.Contains(flag.Names()), "windows-service") {
+	//		runAsWindowsService = true
+	//	}
+	//}
+	fmt.Println(c.runAsWindowsService)
+	ho := &hybridOverLay{ ctx: &ctx, runAsWindowsService: c.runAsWindowsService, appName: appName}
+
+
 
 	c.Action = func(c *cli.Context) error {
 		if err := runHybridOverlay(c); err != nil {
@@ -58,33 +69,36 @@ func main() {
 		return nil
 	}
 
-	if runAsWindowsService {
-		if err := initForOS(&ctx); err != nil {
-			klog.Exit(err)
-		}
-	} else {
-		// trap SIGHUP, SIGINT, SIGTERM, SIGQUIT and
-		// cancel the context
-		ctx, cancel := context.WithCancel(ctx)
-		exitCh := make(chan os.Signal, 1)
-		signal.Notify(exitCh,
-			syscall.SIGHUP,
-			syscall.SIGINT,
-			syscall.SIGTERM,
-			syscall.SIGQUIT)
-		defer func() {
-			signal.Stop(exitCh)
-			cancel()
-		}()
-		go func() {
-			select {
-			case s := <-exitCh:
-				klog.Infof("Received signal %s. Shutting down", s)
-				cancel()
-			case <-ctx.Done():
-			}
-		}()
+	if err := initForOS(ho); err != nil {
+		klog.Exit(err)
 	}
+	//if runAsWindowsService {
+	//	if err := initForOS(&ctx); err != nil {
+	//		klog.Exit(err)
+	//	}
+	//} else {
+	//	// trap SIGHUP, SIGINT, SIGTERM, SIGQUIT and
+	//	// cancel the context
+	//	ctx, cancel := context.WithCancel(ctx)
+	//	exitCh := make(chan os.Signal, 1)
+	//	signal.Notify(exitCh,
+	//		syscall.SIGHUP,
+	//		syscall.SIGINT,
+	//		syscall.SIGTERM,
+	//		syscall.SIGQUIT)
+	//	defer func() {
+	//		signal.Stop(exitCh)
+	//		cancel()
+	//	}()
+	//	go func() {
+	//		select {
+	//		case s := <-exitCh:
+	//			klog.Infof("Received signal %s. Shutting down", s)
+	//			cancel()
+	//		case <-ctx.Done():
+	//		}
+	//	}()
+	//}
 
 	if err := c.RunContext(ctx, os.Args); err != nil {
 		klog.Exit(err)
